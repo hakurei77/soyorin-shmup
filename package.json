@@ -1,0 +1,23 @@
+{
+  "name": "soyorin-shmup",
+  "version": "1.0.0",
+  "description": "星夜弹幕 - 东方风 STG 弹幕射击游戏（独立项目）",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "vue": "^3.5.41"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "sass": "^1.102.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.2.1",
+    "vue-tsc": "^3.3.10"
+  },
+  "packageManager": "pnpm@11.18.0"
+}

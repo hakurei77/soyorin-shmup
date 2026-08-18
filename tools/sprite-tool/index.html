@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>序列帧处理 · 4×4 切割 + 抠图导出</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #1e1f26;
+    color: #e6e6e6;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+
+  #dropzone {
+    width: 100%;
+    max-width: 720px;
+    border: 2px dashed #555a6e;
+    border-radius: 12px;
+    padding: 48px 24px;
+    text-align: center;
+    color: #9aa0b4;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  #dropzone.dragover, #dropzone:hover {
+    border-color: #7aa2f7;
+    background: rgba(122, 162, 247, .08);
+    color: #c0caf5;
+  }
+
+  #workspace {
+    display: none;
+    width: 100%;
+    max-width: 1100px;
+    gap: 24px;
+    margin-top: 8px;
+  }
+  #workspace.show { display: flex; flex-wrap: wrap; }
+
+  .panel {
+    background: #262833;
+    border-radius: 12px;
+    padding: 16px;
+    flex: 1 1 320px;
+  }
+  .panel h2 {
+    font-size: 14px;
+    color: #9aa0b4;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+
+  #imgQueue { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .imgchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 180px;
+    padding: 4px 8px;
+    border: 1px solid #555a6e;
+    border-radius: 8px;
+    background: #1e1f26;
+    color: #9aa0b4;
+    font-size: 12px;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .imgchip.active { border-color: #7aa2f7; color: #c0caf5; }
+  .imgchip .x {
+    color: #6c7086;
+    font-weight: 700;
+    padding: 0 2px;
+  }
+  .imgchip .x:hover { color: #f38ba8; }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .frame {
+    position: relative;
+    aspect-ratio: var(--fr, 1);
+    background-repeat: no-repeat;
+    background-size: 400% 400%;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: 2px solid transparent;
+    outline-offset: 1px;
+    transition: outline-color .15s, opacity .15s;
+    opacity: .45;
+  }
+  .frame.selected { outline-color: #7aa2f7; opacity: 1; }
+  .frame .idx {
+    position: absolute;
+    top: 3px;
+    left: 5px;
+    font-size: 11px;
+    color: #fff;
+    text-shadow: 0 0 3px #000, 0 0 3px #000;
+    pointer-events: none;
+  }
+  .frame .order {
+    position: absolute;
+    bottom: 3px;
+    right: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #7aa2f7;
+    text-shadow: 0 0 3px #000;
+    pointer-events: none;
+  }
+
+  #previewCanvas {
+    display: block;
+    max-width: 100%;
+    background: repeating-conic-gradient(#2f3140 0% 25%, #262833 0% 50%) 0 0 / 16px 16px;
+    border-radius: 8px;
+    margin: 0 auto;
+  }
+
+  .controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  button {
+    background: #7aa2f7;
+    border: none;
+    color: #1e1f26;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: #89b4fa; }
+  button.secondary { background: #3b3d4d; color: #e6e6e6; }
+  button.secondary:hover { background: #4a4d60; }
+  label { font-size: 13px; color: #9aa0b4; display: flex; align-items: center; gap: 6px; }
+  input[type="range"] { accent-color: #7aa2f7; }
+  input[type="number"] {
+    width: 60px;
+    background: #1e1f26;
+    border: 1px solid #555a6e;
+    border-radius: 6px;
+    color: #e6e6e6;
+    padding: 4px 6px;
+    font-size: 13px;
+  }
+  input[type="text"] {
+    width: 110px;
+    background: #1e1f26;
+    border: 1px solid #555a6e;
+    border-radius: 6px;
+    color: #e6e6e6;
+    padding: 4px 8px;
+    font-size: 13px;
+  }
+  #fpsVal { min-width: 56px; display: inline-block; color: #e6e6e6; }
+
+  #clipList { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+  .clip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid rgba(122, 162, 247, .5);
+    border-radius: 999px;
+    background: rgba(122, 162, 247, .1);
+    color: #c0caf5;
+    font-size: 12px;
+  }
+  .clip .x { cursor: pointer; color: #6c7086; font-weight: 700; }
+  .clip .x:hover { color: #f38ba8; }
+
+  .hint { font-size: 12px; color: #6c7086; margin-top: 10px; line-height: 1.6; }
+  #fileInput, #cfgInput, #stripInput { display: none; }
+</style>
+</head>
+<body>
+  <h1>序列帧处理（4×4 切割 · 抠图 · soyorin-shmup 导出）</h1>
+
+  <div id="dropzone">
+    拖拽序列帧图片到这里，或点击选择文件（可多选）<br>
+    <span style="font-size:12px">每张图片将被切割为 4 行 × 4 列，共 16 帧</span>
+  </div>
+  <input id="fileInput" type="file" accept="image/*" multiple>
+
+  <div id="workspace">
+    <div class="panel">
+      <h2>帧列表（点击选择 / 取消，按选择顺序播放）</h2>
+      <div id="imgQueue"></div>
+      <div id="grid"></div>
+      <div class="controls">
+        <button class="secondary" id="btnAll">全选</button>
+        <button class="secondary" id="btnNone">清空</button>
+        <button class="secondary" id="btnAddImg">加图</button>
+      </div>
+      <div class="controls">
+        <label>动作名 <input type="text" id="actionName" value="move" spellcheck="false"></label>
+        <button id="btnAddClip">添加动作</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>预览</h2>
+      <canvas id="previewCanvas"></canvas>
+      <div class="controls">
+        <button id="btnPlay">播放</button>
+        <label>帧率
+          <input type="range" id="fps" min="1" max="30" value="8">
+          <span id="fpsVal">8 FPS</span>
+        </label>
+      </div>
+      <div class="controls">
+        <label>白底去除阈值
+          <input type="range" id="threshold" min="0" max="255" value="32">
+          <input type="number" id="thNum" min="0" max="255" value="32">
+        </label>
+      </div>
+      <div class="controls">
+        <label>文件名 <input type="text" id="fileName" value="player" spellcheck="false"></label>
+        <button id="btnExport">导出全部动作 + 配置文件</button>
+      </div>
+      <div class="controls">
+        <button class="secondary" id="btnSetDir">设置导出目录</button>
+        <button class="secondary" id="btnForgetDir" style="display:none">忘记目录</button>
+        <span id="dirStatus" class="hint" style="margin:0">未设置（导出时手动选择文件夹）</span>
+      </div>
+      <div id="clipList"></div>
+      <div class="controls">
+        <button class="secondary" id="btnLoadCfg">加载现有配置（追加动作）</button>
+        <button class="secondary" id="btnClearCfg" style="display:none">清除已加载配置</button>
+        <span id="cfgStatus" class="hint" style="margin:0"></span>
+      </div>
+      <input id="cfgInput" type="file" accept=".json,application/json">
+      <input id="stripInput" type="file" accept="image/*">
+      <div class="hint">
+        流程：加图（可多选）→ 在图片队列里切换 → 选帧 → 写动作名 → 调好帧率 →「添加动作」入队，
+        重复多次后点「导出全部动作」，所有动作的帧按入队顺序拼成一张条带 +
+        一个 json（animations: { 动作名: { start, length, fps } }）。<br>
+        每个动作的帧率独立：入队时取当前帧率滑块的值，不同动作可以不同；
+        json 顶层的 fps 是缺省值，只对没写 fps 的旧条目生效。<br>
+        同名动作 = 覆盖为新帧；队列里的动作可点 × 移除。<br>
+        抠图采用边缘泛洪——只去除与帧边缘相连的白色背景，
+        角色内部的白色（白袜子、眼白等）会保留；阈值可直接输入数字精调。<br>
+        「加载现有配置」选择旧的 xxx.json，再选择对应的旧条带 png，
+        新动作会追加在旧条带末尾。<br>
+        「设置导出目录」选一次目标文件夹（如 soyorin-shmup/src/assets/frame，
+        或游戏素材目录 soyorin-shmup/public/、main-site/public/stg/）后会记住它，
+        之后点导出直接写入不再弹窗；「忘记目录」可重新设置。
+        不支持的浏览器回退为分别下载两个文件。<br>
+        游戏侧：loadout.ts 中 sprite 填 json 路径（如 '/stg/player.json'），
+        图片路径写在 json 的 image 字段里（换图只改 json）；
+        代码里按动作名调用——左移自动播 left、右移 right、其余 move，新增动作无需改游戏代码。
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const COLS = 4, ROWS = 4, TOTAL = COLS * ROWS;
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const workspace = document.getElementById('workspace');
+  const imgQueue = document.getElementById('imgQueue');
+  const grid = document.getElementById('grid');
+  const canvas = document.getElementById('previewCanvas');
+  const ctx = canvas.getContext('2d');
+  const btnPlay = document.getElementById('btnPlay');
+  const btnAll = document.getElementById('btnAll');
+  const btnNone = document.getElementById('btnNone');
+  const btnAddImg = document.getElementById('btnAddImg');
+  const btnAddClip = document.getElementById('btnAddClip');
+  const btnExport = document.getElementById('btnExport');
+  const fpsInput = document.getElementById('fps');
+  const fpsVal = document.getElementById('fpsVal');
+  const thInput = document.getElementById('threshold');
+  const thNum = document.getElementById('thNum');
+  const nameInput = document.getElementById('fileName');
+  const actionInput = document.getElementById('actionName');
+  const btnLoadCfg = document.getElementById('btnLoadCfg');
+  const btnClearCfg = document.getElementById('btnClearCfg');
+  const cfgInput = document.getElementById('cfgInput');
+  const stripInput = document.getElementById('stripInput');
+  const cfgStatus = document.getElementById('cfgStatus');
+  const clipList = document.getElementById('clipList');
+
+  /** 已加载的图片列表：{ img, url, name, selected: number[] } */
+  let images = [];
+  /** 当前在网格中编辑的图片下标 */
+  let current = -1;
+  /** 动作队列：{ action, frames: canvas[] }，导出时按入队顺序拼接 */
+  const clips = [];
+  let playing = false;
+  let playTimer = null;
+  let playPos = 0;
+
+  // ---------- 图片载入（支持多选 / 多文件拖放） ----------
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) loadFiles(fileInput.files);
+    fileInput.value = '';
+  });
+  btnAddImg.addEventListener('click', () => fileInput.click());
+
+  function loadFiles(fileList) {
+    const files = [...fileList].filter(f => f.type.startsWith('image/'));
+    if (!files.length) { alert('请选择图片文件'); return; }
+    Promise.all(files.map(f => new Promise(res => {
+      const url = URL.createObjectURL(f);
+      const image = new Image();
+      image.onload = () => res({ img: image, url, name: f.name, selected: [] });
+      image.onerror = () => { URL.revokeObjectURL(url); res(null); };
+      image.src = url;
+    }))).then(list => {
+      const added = list.filter(Boolean);
+      if (!added.length) return;
+      stopPlay();
+      images.push(...added);
+      // 首次载入则展开工作区；始终切换到刚载入的第一张
+      current = images.length - added.length;
+      workspace.classList.add('show');
+      switchImage(current);
+    });
+  }
+
+  function switchImage(i) {
+    if (i < 0 || i >= images.length) return;
+    stopPlay();
+    current = i;
+    renderImgQueue();
+    buildGrid();
+    refreshSelectionUI();
+    const sel = curSel();
+    drawFrame(sel.length ? sel[sel.length - 1] : null);
+    btnPlay.textContent = '播放';
+  }
+
+  function removeImage(i, ev) {
+    ev.stopPropagation();
+    const [rm] = images.splice(i, 1);
+    if (rm) URL.revokeObjectURL(rm.url);
+    if (!images.length) {
+      current = -1;
+      stopPlay();
+      workspace.classList.remove('show');
+      return;
+    }
+    if (current >= images.length) current = images.length - 1;
+    switchImage(current);
+  }
+
+  function renderImgQueue() {
+    imgQueue.innerHTML = '';
+    images.forEach((it, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'imgchip' + (i === current ? ' active' : '');
+      chip.title = it.name;
+      chip.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis">${it.name}</span><span class="x">×</span>`;
+      chip.addEventListener('click', () => switchImage(i));
+      chip.querySelector('.x').addEventListener('click', ev => removeImage(i, ev));
+      imgQueue.appendChild(chip);
+    });
+  }
+
+  const curImg = () => images[current].img;
+  const curSel = () => images[current].selected;
+
+  // ---------- 帧网格 ----------
+  function buildGrid() {
+    grid.innerHTML = '';
+    const img = curImg();
+    const fw = img.naturalWidth / COLS;
+    const fh = img.naturalHeight / ROWS;
+    grid.style.setProperty('--fr', `${fw} / ${fh}`);
+    for (let i = 0; i < TOTAL; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'frame';
+      cell.dataset.idx = i;
+      cell.style.backgroundImage = `url(${images[current].url})`;
+      const col = i % COLS, row = (i / COLS) | 0;
+      cell.style.backgroundPosition = `${col / (COLS - 1) * 100}% ${row / (ROWS - 1) * 100}%`;
+      cell.innerHTML = `<span class="idx">${i + 1}</span><span class="order"></span>`;
+      cell.addEventListener('click', () => toggleFrame(i));
+      grid.appendChild(cell);
+    }
+  }
+
+  function toggleFrame(i) {
+    const sel = curSel();
+    const pos = sel.indexOf(i);
+    if (pos >= 0) sel.splice(pos, 1); else sel.push(i);
+    refreshSelectionUI();
+    if (!playing) drawFrame(sel.length ? sel[sel.length - 1] : null);
+  }
+
+  function refreshSelectionUI() {
+    const sel = curSel();
+    grid.querySelectorAll('.frame').forEach(cell => {
+      const i = +cell.dataset.idx;
+      const pos = sel.indexOf(i);
+      cell.classList.toggle('selected', pos >= 0);
+      cell.querySelector('.order').textContent = pos >= 0 ? pos + 1 : '';
+    });
+  }
+
+  btnAll.addEventListener('click', () => {
+    images[current].selected = [...Array(TOTAL).keys()];
+    refreshSelectionUI();
+    if (!playing) drawFrame(0);
+  });
+  btnNone.addEventListener('click', () => {
+    stopPlay();
+    images[current].selected = [];
+    refreshSelectionUI();
+    drawFrame(null);
+  });
+
+  // ---------- 抠图（去除纯白背景，结果按 图片+帧 缓存） ----------
+  const frameCache = new Map(); // `${url}#${idx}` -> 处理后的 canvas
+
+  function getProcessedFrame(i) {
+    const img = curImg();
+    const key = `${images[current].url}#${i}`;
+    const hit = frameCache.get(key);
+    if (hit) return hit;
+    const fw = img.naturalWidth / COLS;
+    const fh = img.naturalHeight / ROWS;
+    const cvs = document.createElement('canvas');
+    cvs.width = fw;
+    cvs.height = fh;
+    const c = cvs.getContext('2d');
+    const col = i % COLS, row = (i / COLS) | 0;
+    c.drawImage(img, col * fw, row * fh, fw, fh, 0, 0, fw, fh);
+    const data = c.getImageData(0, 0, fw, fh);
+    removeBackground(data, fw, fh, +thInput.value);
+    c.putImageData(data, 0, 0);
+    frameCache.set(key, cvs);
+    return cvs;
+  }
+
+  /**
+   * 边缘泛洪去背景：只把「与帧边缘相连」的近白色像素置为透明，
+   * 角色内部被非白色包围的白色（如白袜子、眼白）会保留
+   */
+  function removeBackground(imgData, w, h, t) {
+    const px = imgData.data;
+    const nearWhite = p => px[p] >= 255 - t && px[p + 1] >= 255 - t && px[p + 2] >= 255 - t;
+    const isBg = new Uint8Array(w * h);
+    const stack = [];
+    const push = (x, y) => {
+      const idx = y * w + x;
+      if (isBg[idx]) return;
+      if (!nearWhite(idx * 4)) return;
+      isBg[idx] = 1;
+      stack.push(idx);
+    };
+    // 种子点：四条边上的近白色像素
+    for (let x = 0; x < w; x++) { push(x, 0); push(x, h - 1); }
+    for (let y = 0; y < h; y++) { push(0, y); push(w - 1, y); }
+    while (stack.length) {
+      const idx = stack.pop();
+      const x = idx % w, y = (idx / w) | 0;
+      if (x > 0) push(x - 1, y);
+      if (x < w - 1) push(x + 1, y);
+      if (y > 0) push(x, y - 1);
+      if (y < h - 1) push(x, y + 1);
+    }
+    for (let i = 0; i < isBg.length; i++) if (isBg[i]) px[i * 4 + 3] = 0;
+  }
+
+  function setThreshold(v) {
+    v = Math.max(0, Math.min(255, Math.round(v) || 0));
+    thInput.value = v;
+    thNum.value = v;
+    frameCache.clear();
+    if (current >= 0 && !playing) {
+      const sel = curSel();
+      drawFrame(sel.length ? sel[sel.length - 1] : null);
+    }
+  }
+  thInput.addEventListener('input', () => setThreshold(+thInput.value));
+  thNum.addEventListener('change', () => setThreshold(+thNum.value));
+
+  // ---------- 预览播放 ----------
+  function drawFrame(i) {
+    if (current < 0) return;
+    if (i == null) {
+      const img = curImg();
+      canvas.width = img.naturalWidth / COLS;
+      canvas.height = img.naturalHeight / ROWS;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    const frame = getProcessedFrame(i);
+    canvas.width = frame.width;
+    canvas.height = frame.height;
+    ctx.clearRect(0, 0, frame.width, frame.height);
+    ctx.drawImage(frame, 0, 0);
+  }
+
+  function startPlay() {
+    const sel = curSel();
+    if (!sel.length) { alert('请先在左侧选择至少一帧'); return; }
+    playing = true;
+    playPos = 0;
+    btnPlay.textContent = '暂停';
+    const tick = () => {
+      drawFrame(sel[playPos]);
+      playPos = (playPos + 1) % sel.length;
+      playTimer = setTimeout(tick, 1000 / +fpsInput.value);
+    };
+    tick();
+  }
+
+  function stopPlay() {
+    playing = false;
+    clearTimeout(playTimer);
+    btnPlay.textContent = '播放';
+  }
+
+  btnPlay.addEventListener('click', () => playing ? stopPlay() : startPlay());
+  fpsInput.addEventListener('input', () => { fpsVal.textContent = fpsInput.value + ' FPS'; });
+
+  // ---------- 动作队列：把当前选中帧以动作名入队 ----------
+  function renderClipList() {
+    clipList.innerHTML = '';
+    if (!clips.length) return;
+    const label = document.createElement('span');
+    label.className = 'hint';
+    label.style.margin = '0';
+    label.textContent = '待导出动作：';
+    clipList.appendChild(label);
+    clips.forEach((c, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'clip';
+      chip.innerHTML = `${c.action}（${c.frames.length} 帧 · ${c.fps}fps）<span class="x">×</span>`;
+      chip.querySelector('.x').addEventListener('click', () => {
+        clips.splice(i, 1);
+        renderClipList();
+      });
+      clipList.appendChild(chip);
+    });
+  }
+
+  btnAddClip.addEventListener('click', () => {
+    if (current < 0) { alert('请先加载图片'); return; }
+    const sel = curSel();
+    if (!sel.length) { alert('请先在左侧选择至少一帧'); return; }
+    const action = (actionInput.value.trim() || 'move').replace(/[^\w-]/g, '_');
+    const frames = sel.map(getProcessedFrame);
+    // 帧尺寸一致性：所有动作（含追加模式的旧条带）必须同尺寸
+    const ref = clips[0]?.frames[0] ?? baseStrip;
+    if (ref && (frames[0].width !== ref.width || frames[0].height !== ref.height)) {
+      alert(`帧尺寸不一致：已为 ${ref.width}×${ref.height}，当前为 ${frames[0].width}×${frames[0].height}`);
+      return;
+    }
+    // 同名动作覆盖（以最新入队的为准）
+    const exist = clips.findIndex(c => c.action === action);
+    if (exist >= 0) clips.splice(exist, 1);
+    // 记录本动作的帧率（取当前滑块值，不同动作可以不同）
+    clips.push({ action, frames, fps: +fpsInput.value });
+    images[current].selected = [];
+    refreshSelectionUI();
+    drawFrame(null);
+    renderClipList();
+  });
+
+  // ---------- 追加模式：加载既有配置 + 旧条带，新动作帧追加到末尾 ----------
+  let baseCfg = null;    // 已加载的既有配置（animations 等）
+  let baseStrip = null;  // 已加载的旧条带图片
+  let pendingCfg = null; // 已解析、等待配套条带图片的配置
+
+  function clearAppend() {
+    baseCfg = null;
+    baseStrip = null;
+    pendingCfg = null;
+    cfgStatus.textContent = '';
+    btnClearCfg.style.display = 'none';
+  }
+
+  btnLoadCfg.addEventListener('click', () => cfgInput.click());
+  btnClearCfg.addEventListener('click', clearAppend);
+
+  cfgInput.addEventListener('change', () => {
+    const f = cfgInput.files[0];
+    cfgInput.value = '';
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const cfg = JSON.parse(reader.result);
+        if (!cfg || !cfg.frameWidth || !cfg.frameHeight ||
+            !cfg.animations || typeof cfg.animations !== 'object') throw new Error();
+        pendingCfg = cfg;
+        // 追加需要旧条带图片，紧接着让用户选择
+        stripInput.click();
+      } catch {
+        alert('配置文件格式不正确（需要 frameWidth / frameHeight / animations）');
+      }
+    };
+    reader.readAsText(f);
+  });
+
+  stripInput.addEventListener('change', () => {
+    const f = stripInput.files[0];
+    stripInput.value = '';
+    if (!f || !pendingCfg) return;
+    const url = URL.createObjectURL(f);
+    const image = new Image();
+    image.onload = () => {
+      baseCfg = pendingCfg;
+      pendingCfg = null;
+      baseStrip = image;
+      const names = Object.entries(baseCfg.animations)
+        .map(([k, v]) => `${k}(${v.length})`).join('、');
+      cfgStatus.textContent = `追加模式：已加载动作 ${names}`;
+      btnClearCfg.style.display = '';
+    };
+    image.onerror = () => { alert('条带图片加载失败'); pendingCfg = null; };
+    image.src = url;
+  });
+
+  // ---------- 导出：全部动作横向拼接（抠图后）+ 配置文件，直接写入所选文件夹 ----------
+  function canvasToBytes(cv) {
+    return new Promise(resolve => {
+      cv.toBlob(blob => blob.arrayBuffer().then(buf => resolve(new Uint8Array(buf))), 'image/png');
+    });
+  }
+
+  /** File System Access API：把文件写入用户选择的文件夹 */
+  async function writeToDir(dir, name, data) {
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(data);
+    await w.close();
+  }
+
+  // ---------- 导出目录记忆（File System Access 句柄存入 IndexedDB，设置一次长期生效） ----------
+  const btnSetDir = document.getElementById('btnSetDir');
+  const btnForgetDir = document.getElementById('btnForgetDir');
+  const dirStatus = document.getElementById('dirStatus');
+  let savedDir = null; // 已记住的导出目录句柄
+
+  const idb = {
+    open() {
+      return new Promise((res, rej) => {
+        const r = indexedDB.open('soyorin-png', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('kv');
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+    },
+    async set(k, v) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(v, k);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+    },
+    async get(k) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const rq = db.transaction('kv').objectStore('kv').get(k);
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => rej(rq.error);
+      });
+    },
+    async del(k) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').delete(k);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+    }
+  };
+
+  function renderDirStatus() {
+    if (savedDir) {
+      dirStatus.textContent = `导出目录：${savedDir.name}（点导出直接写入，不再弹窗）`;
+      btnForgetDir.style.display = '';
+    } else {
+      dirStatus.textContent = '未设置（导出时手动选择文件夹）';
+      btnForgetDir.style.display = 'none';
+    }
+  }
+
+  btnSetDir.addEventListener('click', async () => {
+    if (!window.showDirectoryPicker) {
+      alert('当前浏览器不支持直写文件夹（请用 Chrome / Edge）');
+      return;
+    }
+    try {
+      savedDir = await window.showDirectoryPicker({ mode: 'readwrite' });
+      await idb.set('exportDir', savedDir);
+      renderDirStatus();
+    } catch { /* 用户取消 */ }
+  });
+
+  btnForgetDir.addEventListener('click', async () => {
+    savedDir = null;
+    await idb.del('exportDir');
+    renderDirStatus();
+  });
+
+  // 启动时恢复上次设置的导出目录
+  (async () => {
+    try {
+      const h = await idb.get('exportDir');
+      if (h) { savedDir = h; renderDirStatus(); }
+    } catch { /* IndexedDB 不可用时忽略 */ }
+  })();
+
+  /** 取可用的导出目录：优先已记住的目录（必要时请求权限），否则现场选择并记住 */
+  async function resolveExportDir() {
+    if (savedDir) {
+      const perm = await savedDir.requestPermission({ mode: 'readwrite' });
+      if (perm === 'granted') return savedDir;
+      savedDir = null;
+      renderDirStatus();
+    }
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    savedDir = dir;
+    try { await idb.set('exportDir', dir); } catch { /* 忽略持久化失败 */ }
+    renderDirStatus();
+    return dir;
+  }
+
+  /** 回退方案：浏览器不支持文件夹写入时，分别下载 */
+  function download(name, data, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([data], { type }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  btnExport.addEventListener('click', async () => {
+    if (!clips.length) { alert('请先用「添加动作」把至少一个动作加入队列'); return; }
+    const base = (nameInput.value.trim() || 'player').replace(/[\\/:*?"<>|]/g, '_');
+    btnExport.disabled = true;
+    btnExport.textContent = '导出中…';
+    try {
+      const fw = clips[0].frames[0].width;
+      const fh = clips[0].frames[0].height;
+      if (baseCfg && (baseCfg.frameWidth !== fw || baseCfg.frameHeight !== fh)) {
+        alert(`帧尺寸不一致：现有配置为 ${baseCfg.frameWidth}×${baseCfg.frameHeight}，当前为 ${fw}×${fh}，无法追加`);
+        return;
+      }
+      // 旧条带占用的总帧数 = 所有动作区间的最大末尾
+      const oldTotal = baseCfg
+        ? Math.max(0, ...Object.values(baseCfg.animations).map(c => c.start + c.length))
+        : 0;
+      const newTotal = clips.reduce((s, c) => s + c.frames.length, 0);
+      // 条带 = 旧帧（追加模式）+ 动作队列全部帧
+      const strip = document.createElement('canvas');
+      strip.width = fw * (oldTotal + newTotal);
+      strip.height = fh;
+      const sctx = strip.getContext('2d');
+      if (baseStrip) sctx.drawImage(baseStrip, 0, 0);
+      // 配置：动作名 → 条带中的帧区间
+      const animations = baseCfg ? { ...baseCfg.animations } : {};
+      let cursor = oldTotal;
+      for (const c of clips) {
+        c.frames.forEach((f, i) => sctx.drawImage(f, (cursor + i) * fw, 0));
+        // 每个动作带自己的帧率；顶层 fps 作为缺省值（旧条目未带 fps 时使用）
+        animations[c.action] = { start: cursor, length: c.frames.length, fps: c.fps };
+        cursor += c.frames.length;
+      }
+      const pngData = await canvasToBytes(strip);
+      const config = {
+        image: `${base}.png`,
+        fps: +fpsInput.value,
+        frameWidth: fw,
+        frameHeight: fh,
+        animations
+      };
+      const jsonData = new TextEncoder().encode(JSON.stringify(config, null, 2));
+      const pngName = `${base}.png`, jsonName = `${base}.json`;
+
+      if (window.showDirectoryPicker) {
+        try {
+          const dir = await resolveExportDir();
+          await writeToDir(dir, pngName, pngData);
+          await writeToDir(dir, jsonName, jsonData);
+          alert(`已写入 ${dir.name}/：\n${pngName}\n${jsonName}`);
+          return;
+        } catch (e) {
+          // 用户取消选择则中止；其他错误（如权限拒绝）回退为下载
+          if (e && e.name === 'AbortError') return;
+        }
+      }
+      download(pngName, pngData, 'image/png');
+      setTimeout(() => download(jsonName, jsonData, 'application/json'), 300);
+    } finally {
+      btnExport.disabled = false;
+      btnExport.textContent = '导出全部动作 + 配置文件';
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>音频截断工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #1e1f24; color: #e6e6e6;
+    min-height: 100vh; padding: 24px;
+  }
+  h1 { font-size: 20px; margin-bottom: 16px; }
+  .drop {
+    border: 2px dashed #555; border-radius: 12px;
+    padding: 48px; text-align: center; color: #999;
+    cursor: pointer; transition: border-color .2s, background .2s;
+  }
+  .drop:hover, .drop.over { border-color: #6cf; background: #26282e; color: #cdeeff; }
+  .panel { display: none; margin-top: 16px; }
+  .panel.show { display: block; }
+  .wave-wrap {
+    position: relative; background: #141519; border-radius: 8px;
+    overflow: hidden; user-select: none; touch-action: none;
+  }
+  canvas { display: block; width: 100%; height: 160px; cursor: crosshair; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 16px; }
+  .field { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #bbb; }
+  input[type="text"], input[type="number"] {
+    background: #2a2c33; border: 1px solid #444; border-radius: 6px;
+    color: #eee; padding: 6px 10px; width: 110px; font-size: 14px;
+  }
+  button {
+    background: #3a7bd5; border: none; border-radius: 6px; color: #fff;
+    padding: 8px 18px; font-size: 14px; cursor: pointer; transition: background .2s;
+  }
+  button:hover { background: #4a8be5; }
+  button:disabled { background: #444; cursor: not-allowed; }
+  button.secondary { background: #3a3d46; }
+  button.secondary:hover { background: #4a4d56; }
+  .info { font-size: 13px; color: #888; margin-top: 10px; }
+  .hint { font-size: 12px; color: #666; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1>音频截断工具</h1>
+
+<div class="drop" id="drop">
+  拖拽音频文件到这里，或点击选择<br>
+  <span class="hint">支持 mp3 / wav / ogg / m4a / flac 等浏览器可解码格式</span>
+</div>
+<input type="file" id="fileInput" accept="audio/*" hidden>
+
+<div class="panel" id="panel">
+  <div class="wave-wrap" id="waveWrap">
+    <canvas id="wave"></canvas>
+  </div>
+  <div class="hint">在波形上拖拽框选保留区间；拖动两端手柄微调；点击跳转播放位置</div>
+
+  <div class="controls">
+    <div class="field">起点 <input type="text" id="startInput" value="0.000"> s</div>
+    <div class="field">终点 <input type="text" id="endInput" value="0.000"> s</div>
+    <div class="field">时长 <span id="durLabel">0.000</span> s</div>
+    <button class="secondary" id="playSelBtn">试听选区</button>
+    <button class="secondary" id="playAllBtn">试听全曲</button>
+    <button class="secondary" id="stopBtn">停止</button>
+    <button id="exportBtn">导出选区 (WAV)</button>
+  </div>
+
+  <div class="info" id="info"></div>
+</div>
+
+<script>
+(function () {
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('fileInput');
+  const panel = document.getElementById('panel');
+  const waveWrap = document.getElementById('waveWrap');
+  const canvas = document.getElementById('wave');
+  const ctx = canvas.getContext('2d');
+  const startInput = document.getElementById('startInput');
+  const endInput = document.getElementById('endInput');
+  const durLabel = document.getElementById('durLabel');
+  const info = document.getElementById('info');
+  const playSelBtn = document.getElementById('playSelBtn');
+  const playAllBtn = document.getElementById('playAllBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const exportBtn = document.getElementById('exportBtn');
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  let audioBuffer = null;   // 解码后的 AudioBuffer
+  let fileName = 'audio';
+  let selStart = 0;         // 秒
+  let selEnd = 0;           // 秒
+  let peaks = null;         // 波形峰值缓存
+  let playSource = null;
+  let playStartCtxTime = 0;
+  let playOffset = 0;       // 播放起点在 buffer 中的秒数
+  let playEndAt = Infinity; // 播放截止秒数（buffer 时间）
+  let playheadTimer = null;
+  let playheadSec = null;   // 当前播放头位置（buffer 时间），null 表示不在播放
+
+  // ---------- 文件加载 ----------
+  drop.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => {
+    if (e.target.files[0]) loadFile(e.target.files[0]);
+    fileInput.value = '';
+  });
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  });
+
+  async function loadFile(file) {
+    try {
+      info.textContent = '解码中…';
+      const buf = await file.arrayBuffer();
+      audioBuffer = await audioCtx.decodeAudioData(buf);
+      fileName = file.name.replace(/\.[^.]+$/, '');
+      selStart = 0;
+      selEnd = audioBuffer.duration;
+      computePeaks();
+      panel.classList.add('show');
+      info.textContent =
+        file.name + ' | ' + audioBuffer.numberOfChannels + ' 声道 | ' +
+        audioBuffer.sampleRate + ' Hz | 总长 ' + audioBuffer.duration.toFixed(3) + ' s';
+      syncInputs();
+      resizeCanvas();
+    } catch (err) {
+      info.textContent = '解码失败：' + err.message;
+    }
+  }
+
+  // ---------- 波形 ----------
+  function resizeCanvas() {
+    const w = waveWrap.clientWidth;
+    canvas.width = w * devicePixelRatio;
+    canvas.height = 160 * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    computePeaks();
+    draw();
+  }
+  window.addEventListener('resize', () => { if (audioBuffer) resizeCanvas(); });
+
+  function computePeaks() {
+    if (!audioBuffer) return;
+    const w = waveWrap.clientWidth || 800;
+    const ch = audioBuffer.getChannelData(0);
+    const samplesPerPeak = Math.max(1, Math.floor(ch.length / w));
+    peaks = new Float32Array(w);
+    for (let i = 0; i < w; i++) {
+      const start = i * samplesPerPeak;
+      let max = 0;
+      const end = Math.min(start + samplesPerPeak, ch.length);
+      for (let j = start; j < end; j += Math.max(1, samplesPerPeak >> 4)) {
+        const v = Math.abs(ch[j]);
+        if (v > max) max = v;
+      }
+      peaks[i] = max;
+    }
+  }
+
+  function timeToX(t) {
+    return t / audioBuffer.duration * waveWrap.clientWidth;
+  }
+  function xToTime(x) {
+    return Math.min(Math.max(x / waveWrap.clientWidth, 0), 1) * audioBuffer.duration;
+  }
+
+  function draw() {
+    if (!audioBuffer || !peaks) return;
+    const w = waveWrap.clientWidth, h = 160, mid = h / 2;
+    ctx.clearRect(0, 0, w, h);
+
+    // 选区外的遮罩
+    const sx = timeToX(selStart), ex = timeToX(selEnd);
+    ctx.fillStyle = '#2e7d5b22';
+    ctx.fillRect(sx, 0, ex - sx, h);
+    ctx.fillStyle = '#00000088';
+    ctx.fillRect(0, 0, sx, h);
+    ctx.fillRect(ex, 0, w - ex, h);
+
+    // 波形
+    ctx.fillStyle = '#6cf';
+    for (let i = 0; i < Math.min(w, peaks.length); i++) {
+      const amp = Math.max(1, peaks[i] * mid);
+      ctx.fillRect(i, mid - amp, 1, amp * 2);
+    }
+
+    // 时间刻度
+    ctx.fillStyle = '#ffffff55';
+    ctx.font = '10px sans-serif';
+    const step = niceStep(audioBuffer.duration / 8);
+    for (let t = 0; t <= audioBuffer.duration; t += step) {
+      const x = timeToX(t);
+      ctx.fillRect(x, 0, 1, 6);
+      ctx.fillText(t.toFixed(step < 1 ? 1 : 0), x + 3, 14);
+    }
+
+    // 选区边界手柄
+    ctx.fillStyle = '#4ade80';
+    ctx.fillRect(sx - 1, 0, 2, h);
+    ctx.fillRect(ex - 1, 0, 2, h);
+    ctx.fillRect(sx - 5, 0, 10, 14);
+    ctx.fillRect(ex - 5, 0, 10, 14);
+
+    // 播放头
+    if (playheadSec !== null) {
+      const px = timeToX(playheadSec);
+      ctx.fillStyle = '#f87171';
+      ctx.fillRect(px - 1, 0, 2, h);
+    }
+  }
+
+  function niceStep(raw) {
+    const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+    for (const s of steps) if (s >= raw) return s;
+    return 600;
+  }
+
+  // ---------- 选区交互 ----------
+  const HANDLE_PX = 8;
+  let dragMode = null; // 'start' | 'end' | 'select'
+  let dragAnchor = 0;
+
+  canvas.addEventListener('pointerdown', e => {
+    if (!audioBuffer) return;
+    canvas.setPointerCapture(e.pointerId);
+    const x = e.offsetX, t = xToTime(x);
+    if (Math.abs(x - timeToX(selStart)) <= HANDLE_PX) {
+      dragMode = 'start';
+    } else if (Math.abs(x - timeToX(selEnd)) <= HANDLE_PX) {
+      dragMode = 'end';
+    } else {
+      dragMode = 'select';
+      dragAnchor = t;
+      selStart = selEnd = t;
+    }
+    syncInputs();
+    draw();
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (!dragMode || !audioBuffer) return;
+    const t = xToTime(e.offsetX);
+    if (dragMode === 'start') selStart = Math.min(t, selEnd);
+    else if (dragMode === 'end') selEnd = Math.max(t, selStart);
+    else {
+      selStart = Math.min(dragAnchor, t);
+      selEnd = Math.max(dragAnchor, t);
+    }
+    syncInputs();
+    draw();
+  });
+
+  canvas.addEventListener('pointerup', () => {
+    dragMode = null;
+  });
+
+  function syncInputs() {
+    startInput.value = selStart.toFixed(3);
+    endInput.value = selEnd.toFixed(3);
+    durLabel.textContent = Math.max(0, selEnd - selStart).toFixed(3);
+    exportBtn.disabled = !audioBuffer || selEnd - selStart <= 0;
+  }
+
+  function onInputChange() {
+    if (!audioBuffer) return;
+    const s = parseFloat(startInput.value), e2 = parseFloat(endInput.value);
+    if (isFinite(s)) selStart = Math.min(Math.max(s, 0), audioBuffer.duration);
+    if (isFinite(e2)) selEnd = Math.min(Math.max(e2, 0), audioBuffer.duration);
+    if (selStart > selEnd) { const tmp = selStart; selStart = selEnd; selEnd = tmp; }
+    syncInputs();
+    draw();
+  }
+  startInput.addEventListener('change', onInputChange);
+  endInput.addEventListener('change', onInputChange);
+
+  // ---------- 播放 ----------
+  function stopPlayback() {
+    if (playSource) { try { playSource.stop(); } catch (_) {} playSource = null; }
+    if (playheadTimer) { cancelAnimationFrame(playheadTimer); playheadTimer = null; }
+    playheadSec = null;
+    draw();
+  }
+
+  function play(from, to) {
+    if (!audioBuffer) return;
+    stopPlayback();
+    audioCtx.resume();
+    playSource = audioCtx.createBufferSource();
+    playSource.buffer = audioBuffer;
+    playSource.connect(audioCtx.destination);
+    playOffset = from;
+    playEndAt = to;
+    playStartCtxTime = audioCtx.currentTime;
+    playSource.start(0, from, to - from);
+    playSource.onended = () => stopPlayback();
+    tickPlayhead();
+  }
+
+  function tickPlayhead() {
+    const elapsed = audioCtx.currentTime - playStartCtxTime;
+    playheadSec = playOffset + elapsed;
+    if (playheadSec >= playEndAt) { stopPlayback(); return; }
+    draw();
+    playheadTimer = requestAnimationFrame(tickPlayhead);
+  }
+
+  playSelBtn.addEventListener('click', () => play(selStart, selEnd));
+  playAllBtn.addEventListener('click', () => play(0, audioBuffer.duration));
+  stopBtn.addEventListener('click', stopPlayback);
+
+  // ---------- 导出 WAV ----------
+  function encodeWav(buffer) {
+    const numCh = buffer.numberOfChannels;
+    const sr = buffer.sampleRate;
+    const len = buffer.length;
+    const bytesPerSample = 2;
+    const dataSize = len * numCh * bytesPerSample;
+    const buf = new ArrayBuffer(44 + dataSize);
+    const v = new DataView(buf);
+    const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i)); };
+    writeStr(0, 'RIFF');
+    v.setUint32(4, 36 + dataSize, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);              // PCM
+    v.setUint16(22, numCh, true);
+    v.setUint32(24, sr, true);
+    v.setUint32(28, sr * numCh * bytesPerSample, true);
+    v.setUint16(32, numCh * bytesPerSample, true);
+    v.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    v.setUint32(40, dataSize, true);
+    const channels = [];
+    for (let c = 0; c < numCh; c++) channels.push(buffer.getChannelData(c));
+    let off = 44;
+    for (let i = 0; i < len; i++) {
+      for (let c = 0; c < numCh; c++) {
+        let s = Math.max(-1, Math.min(1, channels[c][i]));
+        v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        off += 2;
+      }
+    }
+    return new Blob([buf], { type: 'audio/wav' });
+  }
+
+  exportBtn.addEventListener('click', () => {
+    if (!audioBuffer || selEnd <= selStart) return;
+    const sr = audioBuffer.sampleRate;
+    const startFrame = Math.round(selStart * sr);
+    const endFrame = Math.min(Math.round(selEnd * sr), audioBuffer.length);
+    const len = endFrame - startFrame;
+    const out = audioCtx.createBuffer(audioBuffer.numberOfChannels, len, sr);
+    for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+      out.getChannelData(c).set(audioBuffer.getChannelData(c).subarray(startFrame, endFrame));
+    }
+    const blob = encodeWav(out);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName + '_' + selStart.toFixed(3) + '-' + selEnd.toFixed(3) + '.wav';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+})();
+</script>
+</body>
+</html>

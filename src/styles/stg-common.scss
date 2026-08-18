@@ -1,0 +1,252 @@
+// STG 跨面板共享样式（非 scoped，由 StgGame.vue 引入一次）
+// 仅供 stg 系列组件使用的公共类：覆盖层 / 按钮 / 菜单 / 键位行 / 结算 / 过渡
+@use './stg-vars.scss' as *;
+
+/* ==================== 覆盖层 / 菜单 ==================== */
+
+.stg-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  background: $glass-bg;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  &--dim {
+    background: rgba(5, 5, 15, 0.72);
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: 14px;
+    color: #fff;
+    text-shadow:
+      0 0 18px rgba($accent, 0.8),
+      0 0 60px rgba($accent-purple, 0.5);
+
+    &--small {
+      font-size: 30px;
+      letter-spacing: 8px;
+    }
+  }
+
+  &__subtitle {
+    margin: -12px 0 0;
+    font-size: 12px;
+    letter-spacing: 8px;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  &__hi {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 13px;
+    color: rgba($accent, 0.9);
+    letter-spacing: 2px;
+  }
+}
+
+.stg-clear {
+  text-shadow:
+    0 0 18px rgba(110, 231, 183, 0.8),
+    0 0 60px rgba(110, 231, 183, 0.4);
+}
+
+.stg-over {
+  text-shadow:
+    0 0 18px rgba(251, 113, 133, 0.8),
+    0 0 60px rgba(251, 113, 133, 0.4);
+}
+
+.stg-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.stg-btn {
+  min-width: 220px;
+  padding: 12px 28px;
+  border: 1px solid $glass-border;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 15px;
+  letter-spacing: 3px;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.15s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba($accent, 0.6);
+    box-shadow: 0 0 18px rgba($accent, 0.25);
+    transform: translateY(-1px);
+  }
+
+  &--primary {
+    background: linear-gradient(
+      135deg,
+      rgba($accent, 0.18),
+      rgba($accent-purple, 0.18)
+    );
+    border-color: rgba($accent, 0.5);
+
+    &:hover {
+      background: linear-gradient(
+        135deg,
+        rgba($accent, 0.3),
+        rgba($accent-purple, 0.3)
+      );
+    }
+  }
+}
+
+.stg-help {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+
+  p {
+    margin: 0;
+  }
+}
+
+/* ==================== 键位行（键位设置 / 帧率设置共用） ==================== */
+
+.stg-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 320px;
+  padding: 20px 24px;
+  border: 1px solid $glass-border;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+  }
+
+  &__label {
+    font-size: 13px;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.75);
+  }
+
+  &__key {
+    min-width: 110px;
+    padding: 6px 14px;
+    border: 1px solid rgba($accent, 0.35);
+    border-radius: 8px;
+    background: rgba($accent, 0.08);
+    color: $accent;
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 13px;
+    letter-spacing: 1px;
+    text-align: center;
+    cursor: pointer;
+    transition:
+      background 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+
+    &:hover {
+      background: rgba($accent, 0.18);
+      border-color: rgba($accent, 0.7);
+    }
+
+    &--wait {
+      color: #fff;
+      border-color: rgba($accent-purple, 0.8);
+      background: rgba($accent-purple, 0.18);
+      box-shadow: 0 0 14px rgba($accent-purple, 0.35);
+      animation: stg-keys-pulse 1s ease-in-out infinite;
+    }
+
+    &--active {
+      color: #fff;
+      border-color: rgba($accent, 0.8);
+      background: rgba($accent, 0.2);
+      box-shadow: 0 0 14px rgba($accent, 0.3);
+    }
+  }
+
+  &__fixed {
+    min-width: 110px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.45);
+    text-align: center;
+  }
+
+  &__tip {
+    margin: 0;
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+}
+
+@keyframes stg-keys-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba($accent-purple, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba($accent-purple, 0.5);
+  }
+}
+
+/* ==================== 结算 ==================== */
+
+.stg-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 260px;
+  padding: 18px 24px;
+  border: 1px solid $glass-border;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  &__row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 15px;
+    color: #fff;
+
+    &--dim {
+      font-size: 12px;
+      opacity: 0.65;
+    }
+  }
+}
+
+/* ==================== 过渡动画 ==================== */
+
+.stg-fade-enter-active,
+.stg-fade-leave-active {
+  transition: opacity 0.35s ease;
+}
+.stg-fade-enter-from,
+.stg-fade-leave-to {
+  opacity: 0;
+}

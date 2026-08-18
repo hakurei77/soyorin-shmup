@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抠图工具 · 绿底/白底去背景</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #1e1f26;
+    color: #e6e6e6;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+
+  #dropzone {
+    width: 100%;
+    max-width: 720px;
+    border: 2px dashed #555a6e;
+    border-radius: 12px;
+    padding: 48px 24px;
+    text-align: center;
+    color: #9aa0b4;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  #dropzone.dragover, #dropzone:hover {
+    border-color: #7aa2f7;
+    background: rgba(122, 162, 247, .08);
+    color: #c0caf5;
+  }
+
+  #workspace {
+    display: none;
+    width: 100%;
+    max-width: 1100px;
+    gap: 24px;
+    margin-top: 8px;
+  }
+  #workspace.show { display: flex; flex-wrap: wrap; }
+
+  .panel {
+    background: #262833;
+    border-radius: 12px;
+    padding: 16px;
+    flex: 1 1 320px;
+    min-width: 0;
+  }
+  .panel h2 {
+    font-size: 14px;
+    color: #9aa0b4;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+
+  canvas.view {
+    display: block;
+    max-width: 100%;
+    border-radius: 8px;
+    margin: 0 auto;
+  }
+  #resultCanvas {
+    background: repeating-conic-gradient(#2f3140 0% 25%, #262833 0% 50%) 0 0 / 16px 16px;
+  }
+  #srcCanvas { cursor: crosshair; }
+
+  .zoom-bar { display:flex; align-items:center; gap:6px; margin-bottom:8px; }
+  .zoom-bar .zoom-btn {
+    padding:3px 10px; font-size:13px; background:#3b3d4d; color:#e6e6e6;
+  }
+  .zoom-bar .zoom-btn:hover { background:#4a4d60; }
+  .zoom-pct { font-size:12px; color:#9aa0b4; min-width:46px; text-align:center; }
+  .zoom-wrap {
+    position:relative; overflow:hidden; max-height:560px;
+    border-radius:8px; background:#1e1f26; cursor:grab;
+    display:flex; justify-content:flex-start; align-items:flex-start;
+    user-select:none; touch-action:none;
+  }
+  .zoom-wrap.dragging { cursor:grabbing; }
+  .zoom-wrap canvas { transform-origin:0 0; will-change:transform; }
+
+  .controls { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  button {
+    background: #7aa2f7;
+    border: none;
+    color: #1e1f26;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: #89b4fa; }
+  button.secondary { background: #3b3d4d; color: #e6e6e6; }
+  button.secondary:hover { background: #4a4d60; }
+  label { font-size: 13px; color: #9aa0b4; display: flex; align-items: center; gap: 6px; }
+  input[type="range"] { accent-color: #7aa2f7; }
+  input[type="number"] {
+    width: 60px;
+    background: #1e1f26;
+    border: 1px solid #555a6e;
+    border-radius: 6px;
+    color: #e6e6e6;
+    padding: 4px 6px;
+    font-size: 13px;
+  }
+  input[type="text"] {
+    width: 160px;
+    background: #1e1f26;
+    border: 1px solid #555a6e;
+    border-radius: 6px;
+    color: #e6e6e6;
+    padding: 4px 8px;
+    font-size: 13px;
+  }
+  input[type="color"] {
+    width: 32px;
+    height: 26px;
+    border: 1px solid #555a6e;
+    border-radius: 6px;
+    background: #1e1f26;
+    padding: 1px 2px;
+    cursor: pointer;
+  }
+  select {
+    background: #1e1f26;
+    border: 1px solid #555a6e;
+    border-radius: 6px;
+    color: #e6e6e6;
+    padding: 4px 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .hint { font-size: 12px; color: #6c7086; margin-top: 10px; line-height: 1.6; }
+  #fileInput { display: none; }
+</style>
+</head>
+<body>
+  <h1>抠图工具（绿底 / 白底 · 拖拽图片 · 去背景 · 保存 png）</h1>
+
+  <div id="dropzone">
+    拖拽绿底或白底背景的图片到这里，或点击选择文件<br>
+    <span style="font-size:12px">自动去除背景并生成透明 png，支持高光保护</span>
+  </div>
+  <input id="fileInput" type="file" accept="image/*">
+
+  <div id="workspace">
+    <div class="panel">
+      <h2>原图（点击画面可拾取要抠掉的颜色 · 滚轮缩放 · 拖拽平移）</h2>
+      <div class="zoom-bar">
+        <button class="zoom-btn" data-act="out">−</button>
+        <span class="zoom-pct">100%</span>
+        <button class="zoom-btn" data-act="in">＋</button>
+        <button class="zoom-btn" data-act="reset">重置</button>
+      </div>
+      <div class="zoom-wrap" id="srcWrap">
+        <canvas id="srcCanvas" class="view"></canvas>
+      </div>
+      <div class="controls">
+        <label>抠图模式
+          <select id="keyMode">
+            <option value="green">绿底</option>
+            <option value="white">白底</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+      </div>
+      <div class="controls">
+        <label>键色 <input type="color" id="keyColor" value="#00ff00"></label>
+        <button class="secondary" id="btnResetColor">恢复默认键色</button>
+      </div>
+      <div class="controls">
+        <label>抠除强度
+          <input type="range" id="tol" min="0" max="200" value="60">
+          <input type="number" id="tolNum" min="0" max="200" value="60">
+        </label>
+      </div>
+      <div class="controls">
+        <label>边缘柔化
+          <input type="range" id="soft" min="0" max="100" value="20">
+          <input type="number" id="softNum" min="0" max="100" value="20">
+        </label>
+      </div>
+      <div class="controls">
+        <label>高光保护
+          <input type="range" id="hiProtect" min="0" max="100" value="40">
+          <input type="number" id="hiProtectNum" min="0" max="100" value="40">
+        </label>
+      </div>
+      <div class="controls">
+        <label>最小扣除面积
+          <input type="range" id="minArea" min="0" max="50000" value="1000" step="100">
+          <input type="number" id="minAreaNum" min="0" max="50000" value="1000" step="100">
+        </label>
+      </div>
+      <div class="controls">
+        <label><input type="checkbox" id="despill" checked> 去除边缘溢色</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>预览（透明区域显示为棋盘格 · 滚轮缩放 · 拖拽平移）</h2>
+      <div class="zoom-bar">
+        <button class="zoom-btn" data-act="out">−</button>
+        <span class="zoom-pct">100%</span>
+        <button class="zoom-btn" data-act="in">＋</button>
+        <button class="zoom-btn" data-act="reset">重置</button>
+      </div>
+      <div class="zoom-wrap" id="resWrap">
+        <canvas id="resultCanvas" class="view"></canvas>
+      </div>
+      <div class="controls">
+        <label>文件名 <input type="text" id="fileName" value="keyed" spellcheck="false"></label>
+        <button id="btnSave">保存 png</button>
+      </div>
+      <div class="controls">
+        <button class="secondary" id="btnSetDir">设置保存目录</button>
+        <button class="secondary" id="btnForgetDir" style="display:none">忘记目录</button>
+        <span id="dirStatus" class="hint" style="margin:0">未设置（保存时手动选择文件夹）</span>
+      </div>
+      <div class="hint">
+        浏览器安全限制：无法直接写入本 html 所在文件夹，「设置保存目录」选一次本文件夹（tools/green-key-tool）
+        后会通过 IndexedDB 记住它，之后点保存直接写入不再弹窗；不支持的浏览器回退为下载。<br>
+        抠图模式：绿底用绿色加权色差，白底用等权色差（键色自动设为纯白）；自定义可点左侧原图拾取任意背景色。<br>
+        抠图原理：按像素与键色的色差决定透明度——色差小于「抠除强度」判为背景；
+        「边缘柔化」让过渡带半透明，避免生硬锯齿；「去除边缘溢色」把残留反光压回中性色。<br>
+        高光保护：白底抠图时，角色身上的亮部（如高光、浅色服饰）容易被误判为背景。
+        该项按饱和度区分——接近纯白且低饱和的判为背景，带有明显色彩的亮像素会被保留。
+        数值越大保护越强（0=关闭）。若仍有高光被抠，可适当调低「抠除强度」或调高「高光保护」。<br>
+        最小扣除面积：按 4 连通把候选背景分块，只有面积达到该值的相连大块才会被扣除。
+        角色身上零散的小白点、细小高光因面积不足会被完整保留；0=关闭该过滤（所有候选背景都扣）。
+        建议从 1000 起，按图分辨率上调。
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const workspace = document.getElementById('workspace');
+  const srcCanvas = document.getElementById('srcCanvas');
+  const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
+  const resultCanvas = document.getElementById('resultCanvas');
+  const resCtx = resultCanvas.getContext('2d');
+  const keyColorInput = document.getElementById('keyColor');
+  const keyMode = document.getElementById('keyMode');
+  const tolInput = document.getElementById('tol');
+  const tolNum = document.getElementById('tolNum');
+  const softInput = document.getElementById('soft');
+  const softNum = document.getElementById('softNum');
+  const hiProtectInput = document.getElementById('hiProtect');
+  const hiProtectNum = document.getElementById('hiProtectNum');
+  const minAreaInput = document.getElementById('minArea');
+  const minAreaNum = document.getElementById('minAreaNum');
+  const despillInput = document.getElementById('despill');
+  const nameInput = document.getElementById('fileName');
+  const btnSave = document.getElementById('btnSave');
+
+  let srcImg = null;
+
+  // ---------- 缩放 / 平移 ----------
+  let suppressClick = false; // 拖拽后抑制一次拾色 click
+  function makeZoomable(wrapId, canvas) {
+    const wrap = document.getElementById(wrapId);
+    const pct = wrap.parentElement.querySelector('.zoom-pct');
+    let scale = 1, tx = 0, ty = 0;
+    let dragging = false, lastX = 0, lastY = 0, moveDist = 0;
+    function apply() {
+      canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+      if (pct) pct.textContent = Math.round(scale * 100) + '%';
+    }
+    function setScale(ns, ax, ay) {
+      ns = Math.max(0.1, Math.min(16, ns));
+      if (ax != null) {
+        const cx = (ax - tx) / scale, cy = (ay - ty) / scale;
+        tx = ax - cx * ns; ty = ay - cy * ns;
+      }
+      scale = ns; apply();
+    }
+    wrap.addEventListener('wheel', e => {
+      e.preventDefault();
+      const rect = wrap.getBoundingClientRect();
+      setScale(scale * (e.deltaY < 0 ? 1.15 : 1/1.15), e.clientX - rect.left, e.clientY - rect.top);
+    }, { passive: false });
+    wrap.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      dragging = true; lastX = e.clientX; lastY = e.clientY; moveDist = 0;
+      wrap.classList.add('dragging');
+    });
+    window.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      moveDist += Math.abs(dx) + Math.abs(dy);
+      tx += dx; ty += dy; lastX = e.clientX; lastY = e.clientY;
+      apply();
+    });
+    window.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false; wrap.classList.remove('dragging');
+      if (moveDist > 4) { suppressClick = true; setTimeout(() => suppressClick = false, 0); }
+    });
+    // 工具条按钮
+    wrap.parentElement.querySelectorAll('.zoom-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const act = btn.dataset.act;
+        const rect = wrap.getBoundingClientRect();
+        const cx = rect.width / 2, cy = rect.height / 2;
+        if (act === 'in') setScale(scale * 1.25, cx, cy);
+        else if (act === 'out') setScale(scale / 1.25, cx, cy);
+        else { scale = 1; tx = 0; ty = 0; apply(); }
+      });
+    });
+    return { reset() { scale = 1; tx = 0; ty = 0; apply(); } };
+  }
+  const srcZoom = makeZoomable('srcWrap', srcCanvas);
+  const resZoom = makeZoomable('resWrap', resultCanvas);
+
+  // ---------- 图片载入 ----------
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) loadFile(fileInput.files[0]);
+    fileInput.value = '';
+  });
+
+  function loadFile(f) {
+    if (!f.type.startsWith('image/')) { alert('请选择图片文件'); return; }
+    const url = URL.createObjectURL(f);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      srcImg = image;
+      srcCanvas.width = image.naturalWidth;
+      srcCanvas.height = image.naturalHeight;
+      srcCtx.drawImage(image, 0, 0);
+      // 默认文件名：原名去扩展名 + -keyed
+      nameInput.value = f.name.replace(/\.[^.]+$/, '') + '-keyed';
+      workspace.classList.add('show');
+      srcZoom.reset(); resZoom.reset();
+      process();
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); alert('图片加载失败'); };
+    image.src = url;
+  }
+
+  // ---------- 键色拾取 ----------
+  function hexToRgb(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+  }
+  srcCanvas.addEventListener('click', e => {
+    if (!srcImg || suppressClick) return;
+    const rect = srcCanvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / rect.width * srcCanvas.width);
+    const y = Math.floor((e.clientY - rect.top) / rect.height * srcCanvas.height);
+    const d = srcCtx.getImageData(x, y, 1, 1).data;
+    keyColorInput.value = rgbToHex(d[0], d[1], d[2]);
+    process();
+  });
+  function defaultKeyColorForMode(m) {
+    return m === 'white' ? '#ffffff' : m === 'green' ? '#00ff00' : keyColorInput.value;
+  }
+  function applyMode() {
+    const m = keyMode.value;
+    if (m === 'green') keyColorInput.value = '#00ff00';
+    else if (m === 'white') keyColorInput.value = '#ffffff';
+    // custom: keep current
+    process();
+  }
+  keyMode.addEventListener('change', applyMode);
+  document.getElementById('btnResetColor').addEventListener('click', () => {
+    keyColorInput.value = defaultKeyColorForMode(keyMode.value);
+    process();
+  });
+  keyColorInput.addEventListener('input', () => {
+    if (keyColorInput.value.toLowerCase() !== defaultKeyColorForMode(keyMode.value).toLowerCase()) {
+      keyMode.value = 'custom';
+    }
+    process();
+  });
+
+  // ---------- 抠图 ----------
+  function bindPair(range, num) {
+    range.addEventListener('input', () => { num.value = range.value; process(); });
+    num.addEventListener('change', () => {
+      const v = Math.max(+range.min, Math.min(+range.max, Math.round(+num.value) || 0));
+      num.value = v;
+      range.value = v;
+      process();
+    });
+  }
+  bindPair(tolInput, tolNum);
+  bindPair(softInput, softNum);
+  bindPair(hiProtectInput, hiProtectNum);
+  bindPair(minAreaInput, minAreaNum);
+  despillInput.addEventListener('change', process);
+
+  // 连通域标记（4 连通，并查集），返回每个像素所属根标签（-1=非候选）与各根面积
+  function labelComponents(isBg, w, h) {
+    const n = w * h;
+    const labels = new Int32Array(n).fill(-1);
+    const parent = [0];
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    function union(a, b) { a = find(a); b = find(b); if (a !== b) parent[b] = a; }
+    let next = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
+        if (!isBg[idx]) continue;
+        const left = x > 0 ? labels[idx - 1] : -1;
+        const up = y > 0 ? labels[idx - w] : -1;
+        if (left < 0 && up < 0) {
+          labels[idx] = next; parent[next] = next; next++;
+        } else if (left >= 0 && up >= 0) {
+          labels[idx] = left; union(left, up);
+        } else {
+          labels[idx] = left >= 0 ? left : up;
+        }
+      }
+    }
+    // 第二遍：归并根 + 统计面积
+    const area = new Map();
+    for (let i = 0; i < n; i++) {
+      if (labels[i] < 0) continue;
+      const r = find(labels[i]);
+      labels[i] = r;
+      area.set(r, (area.get(r) || 0) + 1);
+    }
+    return { labels, area };
+  }
+
+  function process() {
+    if (!srcImg) return;
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const data = srcCtx.getImageData(0, 0, w, h);
+    const px = data.data;
+    const mode = keyMode.value;
+    const [kr, kg, kb] = hexToRgb(keyColorInput.value);
+    const tol = +tolInput.value;      // 色差阈值：小于它视为背景
+    const soft = +softInput.value;    // 柔化带宽度：tol ~ tol+soft 之间半透明
+    const despill = despillInput.checked;
+    const range = Math.max(1, soft);
+    const hiProtect = +hiProtectInput.value / 100; // 0..1 饱和保护阈值
+    const minArea = +minAreaInput.value;           // 最小扣除面积，0=不过滤
+    const wr = mode === 'green' ? 2 : 3;
+    const wg = mode === 'green' ? 4 : 3;
+    const wb = mode === 'green' ? 2 : 3;
+
+    const n = w * h;
+    const distArr = new Float32Array(n);
+    const protArr = new Uint8Array(n);
+    const isBg = new Uint8Array(n); // 候选背景（dist<tol 且未被高光保护）
+
+    // 第一遍：算色差 / 饱和保护 / 候选背景
+    for (let p = 0; p < n; p++) {
+      const i = p * 4;
+      const r = px[i], g = px[i + 1], b = px[i + 2];
+      const dist = Math.sqrt(
+        wr * (r - kr) * (r - kr) +
+        wg * (g - kg) * (g - kg) +
+        wb * (b - kb) * (b - kb)
+      );
+      distArr[p] = dist;
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      const sat = mx === 0 ? 0 : (mx - mn) / mx;
+      const protectedHi = mode === 'white' && hiProtect > 0 && sat > hiProtect;
+      protArr[p] = protectedHi ? 1 : 0;
+      if (dist < tol && !protectedHi) isBg[p] = 1;
+    }
+
+    // 连通域过滤：只保留面积 >= minArea 的大块背景
+    let bigBg;
+    if (minArea > 0) {
+      const { labels, area } = labelComponents(isBg, w, h);
+      bigBg = new Uint8Array(n);
+      for (let p = 0; p < n; p++) {
+        if (labels[p] >= 0 && area.get(labels[p]) >= minArea) bigBg[p] = 1;
+      }
+    } else {
+      bigBg = isBg;
+    }
+
+    // 第二遍：设透明度 + 柔化 + 去溢色
+    for (let p = 0; p < n; p++) {
+      const i = p * 4;
+      const r = px[i], g = px[i + 1], b = px[i + 2];
+      const dist = distArr[p];
+      const x = p % w, y = (p / w) | 0;
+      let alpha;
+      if (bigBg[p]) {
+        alpha = 0;
+      } else if (dist < tol + range) {
+        // 边缘柔化带：仅当相邻大块背景时才半透明，否则保留（保护小块高光）
+        let nearBig = false;
+        if (x > 0 && bigBg[p - 1]) nearBig = true;
+        else if (x < w - 1 && bigBg[p + 1]) nearBig = true;
+        else if (y > 0 && bigBg[p - w]) nearBig = true;
+        else if (y < h - 1 && bigBg[p + w]) nearBig = true;
+        if (nearBig && dist >= tol) {
+          alpha = Math.round((dist - tol) / range * 255);
+        } else if (nearBig) {
+          alpha = 0; // 落在 tol 内但被面积过滤掉的小块边缘，紧邻大块→透明
+        } else {
+          alpha = 255; // 孤立小块，保留
+        }
+      } else {
+        alpha = 255;
+      }
+      px[i + 3] = alpha;
+
+      // 去边缘溢色
+      if (despill) {
+        if (mode === 'white') {
+          if (alpha > 0 && alpha < 255) {
+            const mn2 = Math.min(r, g, b);
+            if (Math.max(r, g, b) > mn2) {
+              const k = 0.5;
+              px[i] = r - (r - mn2) * k;
+              px[i + 1] = g - (g - mn2) * k;
+              px[i + 2] = b - (b - mn2) * k;
+            }
+          }
+        } else {
+          if (g > r && g > b) {
+            px[i + 1] = Math.max(r, b);
+          }
+        }
+      }
+    }
+    resultCanvas.width = w;
+    resultCanvas.height = h;
+    resCtx.putImageData(data, 0, 0);
+  }
+
+  // ---------- 保存目录记忆（File System Access 句柄存入 IndexedDB） ----------
+  const btnSetDir = document.getElementById('btnSetDir');
+  const btnForgetDir = document.getElementById('btnForgetDir');
+  const dirStatus = document.getElementById('dirStatus');
+  let savedDir = null;
+
+  const idb = {
+    open() {
+      return new Promise((res, rej) => {
+        const r = indexedDB.open('soyorin-greenkey', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('kv');
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+    },
+    async set(k, v) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(v, k);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+    },
+    async get(k) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const rq = db.transaction('kv').objectStore('kv').get(k);
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => rej(rq.error);
+      });
+    },
+    async del(k) {
+      const db = await this.open();
+      return new Promise((res, rej) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').delete(k);
+        tx.oncomplete = res;
+        tx.onerror = () => rej(tx.error);
+      });
+    }
+  };
+
+  function renderDirStatus() {
+    if (savedDir) {
+      dirStatus.textContent = `保存目录：${savedDir.name}（点保存直接写入，不再弹窗）`;
+      btnForgetDir.style.display = '';
+    } else {
+      dirStatus.textContent = '未设置（保存时手动选择文件夹）';
+      btnForgetDir.style.display = 'none';
+    }
+  }
+
+  btnSetDir.addEventListener('click', async () => {
+    if (!window.showDirectoryPicker) {
+      alert('当前浏览器不支持直写文件夹（请用 Chrome / Edge）');
+      return;
+    }
+    try {
+      savedDir = await window.showDirectoryPicker({ mode: 'readwrite' });
+      await idb.set('exportDir', savedDir);
+      renderDirStatus();
+    } catch { /* 用户取消 */ }
+  });
+
+  btnForgetDir.addEventListener('click', async () => {
+    savedDir = null;
+    await idb.del('exportDir');
+    renderDirStatus();
+  });
+
+  (async () => {
+    try {
+      const h = await idb.get('exportDir');
+      if (h) { savedDir = h; renderDirStatus(); }
+    } catch { /* IndexedDB 不可用时忽略 */ }
+  })();
+
+  async function resolveExportDir() {
+    if (savedDir) {
+      const perm = await savedDir.requestPermission({ mode: 'readwrite' });
+      if (perm === 'granted') return savedDir;
+      savedDir = null;
+      renderDirStatus();
+    }
+    const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+    savedDir = dir;
+    try { await idb.set('exportDir', dir); } catch { /* 忽略持久化失败 */ }
+    renderDirStatus();
+    return dir;
+  }
+
+  function download(name, blob) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  // ---------- 保存 ----------
+  btnSave.addEventListener('click', async () => {
+    if (!srcImg) { alert('请先拖入一张图片'); return; }
+    const base = (nameInput.value.trim() || 'keyed').replace(/[\\/:*?"<>|]/g, '_');
+    const pngName = `${base}.png`;
+    btnSave.disabled = true;
+    btnSave.textContent = '保存中…';
+    try {
+      const blob = await new Promise(res => resultCanvas.toBlob(res, 'image/png'));
+      if (window.showDirectoryPicker) {
+        try {
+          const dir = await resolveExportDir();
+          const fh = await dir.getFileHandle(pngName, { create: true });
+          const w = await fh.createWritable();
+          await w.write(blob);
+          await w.close();
+          alert(`已写入 ${dir.name}/${pngName}`);
+          return;
+        } catch (e) {
+          if (e && e.name === 'AbortError') return;
+        }
+      }
+      download(pngName, blob);
+    } finally {
+      btnSave.disabled = false;
+      btnSave.textContent = '保存 png';
+    }
+  });
+})();
+</script>
+</body>
+</html>

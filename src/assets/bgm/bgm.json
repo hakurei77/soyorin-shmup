@@ -1,0 +1,39 @@
+[
+  {
+    "id": "home",
+    "path": "./home.mp3",
+    "volume": 0.5,
+    "title": "启航曲"
+  },
+  {
+    "id": "gamePage",
+    "path": "./gamePage.mp3",
+    "volume": 0.5,
+    "title": "战斗曲"
+  },
+  {
+    "id": "shop",
+    "path": "./shop.mp3",
+    "volume": 0.5,
+    "title": "商店曲"
+  },
+  {
+    "id": "boss-vorn",
+    "path": "./boss/starship-cutlass.mp3",
+    "volume": 0.5,
+    "title": "Starship Cutlass（掠星者·沃恩）",
+    "bpm": 168
+  },
+  {
+    "id": "boss-prism",
+    "path": "./boss/spellblade-spiral.mp3",
+    "volume": 0.5,
+    "title": "Spellblade Spiral（棱镜星卫）"
+  },
+  {
+    "id": "boss-firmament",
+    "path": "./boss/neon-armageddon.mp3",
+    "volume": 0.5,
+    "title": "Neon Armageddon（星渊巨构·绯红天幕）"
+  }
+]

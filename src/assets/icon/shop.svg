@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 24 24" fill="#ffffff">
+  <defs>
+    <mask id="shop-layer">
+      <rect width="24" height="24" fill="#fff" />
+      <!-- 雨棚斜向条纹切线 -->
+      <path d="M6.2 3.6 L4.9 10.2" stroke="#000" stroke-width="1.3" />
+      <path d="M10.1 3.6 L9.7 10.2" stroke="#000" stroke-width="1.3" />
+      <path d="M13.9 3.6 L14.3 10.2" stroke="#000" stroke-width="1.3" />
+      <path d="M17.8 3.6 L19.1 10.2" stroke="#000" stroke-width="1.3" />
+      <!-- 门与橱窗负空间 -->
+      <rect x="10.3" y="14.2" width="3.4" height="6.6" fill="#000" />
+      <rect x="5.2" y="14" width="3.2" height="3" fill="#000" />
+    </mask>
+  </defs>
+  <g mask="url(#shop-layer)">
+    <!-- 厚雨棚 -->
+    <polygon points="2.6,3.4 21.4,3.4 22.8,10.4 1.2,10.4" />
+    <!-- 店体 -->
+    <polygon points="3.6,11.8 20.4,11.8 20.4,20.8 3.6,20.8" />
+  </g>
+  <!-- 顶部招牌菱形，压住雨棚上缘 -->
+  <polygon points="12,0.8 13.4,2.2 12,3.6 10.6,2.2" />
+  <!-- 右侧悬浮提示方块 -->
+  <rect x="21.6" y="13" width="1.9" height="1.9" />
+</svg>
